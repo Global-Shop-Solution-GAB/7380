@@ -1,0 +1,760 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.frmBondParts..Create(BaseForm)
+Gui.frmBondParts..Caption("Bonded Parts Dashboard - 7380")
+Gui.frmBondParts..Size(15360,10800)
+Gui.frmBondParts..MinX(0)
+Gui.frmBondParts..MinY(0)
+Gui.frmBondParts..Position(0,0)
+Gui.frmBondParts..AlwaysOnTop(False)
+Gui.frmBondParts..FontName("Tahoma")
+Gui.frmBondParts..FontSize(8.25)
+Gui.frmBondParts..ControlBox(True)
+Gui.frmBondParts..MaxButton(True)
+Gui.frmBondParts..MinButton(True)
+Gui.frmBondParts..MousePointer(0)
+Gui.frmBondParts..Moveable(True)
+Gui.frmBondParts..Sizeable(True)
+Gui.frmBondParts..ShowInTaskBar(True)
+Gui.frmBondParts..TitleBar(True)
+Gui.frmBondParts..Event(UnLoad,frmBondParts_UnLoad)
+Gui.frmBondParts.GSGCBondParts.Create(GsGridControl)
+Gui.frmBondParts.GSGCBondParts.Enabled(True)
+Gui.frmBondParts.GSGCBondParts.Visible(True)
+Gui.frmBondParts.GSGCBondParts.Zorder(0)
+Gui.frmBondParts.GSGCBondParts.Size(15360,10350)
+Gui.frmBondParts.GSGCBondParts.Position(0,0)
+Gui.frmBondParts.GSGCBondParts.Dock(5)
+Gui.frmBondParts.GSGCBondParts.Anchor(15)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Local.iCurrentMonth.Declare
+V.Local.iMonthCnt.Declare
+V.Local.iMonthOffset.Declare
+V.Global.bLongPart.Declare
+V.Global.sSupplierStockDTs.Declare
+V.Global.sTranslationFile.Declare
+V.Global.sTranslationFileContents.Declare
+V.Global.bNoVisuals.Declare
+
+F.Intrinsic.Control.Try	
+	F.Global.General.ReadOption("400861",0,False,"0004",V.Global.bLongPart)
+	'Create Dictionary to determine month name based on Number passed to it
+	F.Data.Dictionary.Create("dictMonthNames")
+	F.Data.Dictionary.AddItem("dictMonthNames", 1, "January")
+	F.Data.Dictionary.AddItem("dictMonthNames", 2, "Febuary")
+	F.Data.Dictionary.AddItem("dictMonthNames", 3, "March")
+	F.Data.Dictionary.AddItem("dictMonthNames", 4, "April")
+	F.Data.Dictionary.AddItem("dictMonthNames", 5, "May")
+	F.Data.Dictionary.AddItem("dictMonthNames", 6, "June")
+	F.Data.Dictionary.AddItem("dictMonthNames", 7, "July")
+	F.Data.Dictionary.AddItem("dictMonthNames", 8, "August")
+	F.Data.Dictionary.AddItem("dictMonthNames", 9, "September")
+	F.Data.Dictionary.AddItem("dictMonthNames", 10, "October")
+	F.Data.Dictionary.AddItem("dictMonthNames", 11, "November")
+	F.Data.Dictionary.AddItem("dictMonthNames", 12, "December")
+	
+	'Create Dictionary to determine the offset, where current month number is 0. E.g. if current date is in Feb, key: 2 value: 0
+	F.Intrinsic.Date.Month(V.Ambient.Date, V.Local.iCurrentMonth)
+	F.Data.Dictionary.Create("dictMonthOffset")
+	
+	'Create Another Dictionary to determine the offset, where current month number is 0. E.g. if current date is in Feb, key: 0 value: 2
+	F.Data.Dictionary.Create("dictMonthOffsetRev")
+	
+	F.Intrinsic.Control.For(V.Local.iMonthCnt, 0, 11, 1)
+		F.Intrinsic.Math.Mod(V.Local.iCurrentMonth, 13, V.Local.iMonthOffset)
+		'This statement ensures that the mod resets the month count back to 1 instead of 0. Going from month 12 > 1 instead of 0
+		F.Intrinsic.Control.If(V.Local.iMonthOffset, <, V.Local.iCurrentMonth)
+			V.Local.iMonthOffset.Set(V.Local.iMonthOffset.++)
+		F.Intrinsic.Control.EndIf
+		F.Data.Dictionary.AddItem("dictMonthOffset", V.Local.iMonthCnt, V.Local.iMonthOffset)
+		F.Data.Dictionary.AddItem("dictMonthOffsetRev", V.Local.iMonthOffset, V.Local.iMonthCnt)
+		V.Local.iCurrentMonth.Set(V.Local.iCurrentMonth.++)
+	F.Intrinsic.Control.Next(V.Local.iMonthCnt)
+	
+	V.Global.bNoVisuals.Set(V.Ambient.IsInTaskScheduler)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Project: 7380: Bonded Parts Report
+'Author: Brandon Medina 
+'Customer: Progressive Dynamics Inc
+'Quote: 14452-0
+'Description: Script is for Bonded Parts Dashboard. Refer to quote for columns. This will be view only
+
+F.Intrinsic.Control.Try
+	V.Local.sMin.Declare
+
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		F.Intrinsic.Control.Case(38130)
+			'Post OLU Hook. This caches the Forecast Data for use in APOG and email file 
+			V.Global.bNoVisuals.Set(True)
+			F.Intrinsic.Control.CallSub("LoadDT")
+		F.Intrinsic.Control.CaseElse
+			F.Intrinsic.Control.CallSub("SetContextMenu")
+	
+			F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+				Gui.frmBondParts..Show()
+			F.Intrinsic.Control.EndIf
+		
+			F.Intrinsic.Control.CallSub("LoadDT")
+			
+			F.Intrinsic.Control.If(V.Global.bNoVisuals)
+				'Call logic to email the table as a csv filtered for the suppliers on the list 
+				F.Intrinsic.Control.CallSub(SendEmail)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndSelect
+	F.Intrinsic.Control.EndSelect
+
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+	Gui.frmBondParts.GSGCBondParts.HideWait()
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Caller.ScriptFile , V.Ambient.Newline, V.Args.CurrentSub,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError)
+Program.Sub.Error.End
+Program.Sub.frmBondParts_UnLoad.Start
+F.Intrinsic.Control.End
+Program.Sub.frmBondParts_UnLoad.End
+
+Program.Sub.SetContextMenu.Start
+F.Intrinsic.Control.Try
+	Gui.frmBondParts..ContextMenuCreate("ctxBondParts")
+	Gui.frmBondParts.GSGCBondParts.ContextMenuAttach("ctxBondParts")
+	Gui.frmBondParts..ContextMenuAddItem("ctxBondParts", "Export", V.Enum.MenuItemType!Button, "Export To CSV")
+	Gui.frmBondParts..ContextMenuSetItemEventHandler("ctxBondParts", "Export", "ExportGridToCSV")
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.SetContextMenu.End
+
+Program.Sub.ExportGridToCSV.Start
+F.Intrinsic.Control.Try
+	V.Local.sFileExport.Declare
+	V.Local.bExcel.Declare
+	V.Local.bFileLocked.Declare
+	V.Local.sForm.Declare
+	V.Local.sControl.Declare
+	V.Local.sExt.Declare
+	V.Local.sVendorMatch.Declare
+	V.Local.sFileName.Declare
+	V.Local.sFileExportArray.Declare
+	V.Local.sFilePath.Declare
+
+	V.Local.sForm.Set("frmBondParts")
+	V.Local.sControl.Set("GSGCBondParts")
+	V.Local.sExt.Set("csv")
+
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		F.Intrinsic.String.Build("{0}\GCG_7380_Bonded_Parts_Export.{1}",V.Caller.LocalGssTempDir,V.Local.sExt,V.Local.sFileExport)
+	F.Intrinsic.Control.Else
+		V.Local.sVendorMatch.Set(V.Args.VENDOR_MATCH)
+		F.Intrinsic.String.Build("{0}\CUSTOM\7380\EmailedFiles\RP402-{1}.{2}",V.Caller.GlobalDir, V.Local.sVendorMatch, V.Local.sExt,V.Local.sFileExport)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.File.IsFileLocked(V.Local.sFileExport,V.Local.bFileLocked)
+	F.Intrinsic.Control.If(V.Local.bFileLocked)
+		F.Intrinsic.String.Build("File is already open. Please close and export again.{0}File: {1}",V.Ambient.NewLine,V.Local.sFileExport,V.Local.sMsg)
+		F.Intrinsic.UI.Msgbox(V.Local.sMsg,"File In Use")
+		
+	F.Intrinsic.Control.Else
+		Gui.[V.Local.sForm].[V.Local.sControl].Export(V.Local.sFileExport,V.Local.sExt)
+		'Only open the file if they are running the menu item, otherwise return the name of the newly created csv
+		F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+			F.Intrinsic.Task.ShellExec(0,"",V.Local.sFileExport,"","",1)
+		F.Intrinsic.Control.Else
+			'QueueMessage needs Attachment file name *!* file path
+			F.Intrinsic.File.GetFileNameFromFQN(V.Local.sFileExport, V.Local.sFileName)
+			F.Intrinsic.File.GetPathFromFQN(V.Local.sFileExport, V.Local.sFilePath)
+			F.Intrinsic.String.Build("{0}*!*{1}", V.Local.sFileName, V.Local.sFilePath, V.Local.sFileExportArray)
+			F.Intrinsic.Variable.AddRV("CSVEXPORT", V.Local.sFileExportArray)
+		F.Intrinsic.Control.EndIf
+		
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.CatchWhen(5700)
+	F.Intrinsic.UI.Msgbox("No Data to Export","Export")
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.ExportGridToCSV.End
+
+Program.Sub.LoadDT.Start
+F.Intrinsic.Control.Try
+	V.Local.sSQLA.Declare
+	V.Local.sSQLB.Declare
+	V.Local.sSQLC.Declare
+	
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		Gui.frmBondParts.GSGCBondParts.InvokeWait("Loading Inventory Master Records...", "Please Wait")
+	F.Intrinsic.Control.EndIf
+	
+	'A: INVENTORY_MSTR
+	'B: INVENTORY_MST2 
+	'C: V_VENDOR_MASTER 
+	
+		'Temporarily bring in PART + Month num (translated through dictMonthOffset) as the match criteria for later on. 
+	F.Intrinsic.String.Build("select rtrim(ltrim(A.PART)) as PART_REV, A.DESCRIPTION, A.TIME_MATERIAL_LEAD as LEAD_TIME, A.QTY_ONHAND as ON_HAND, '' as SUPPLIER_STOCK, rtrim(ltrim(A.PART)) + '{0}' as MATCH_0, rtrim(ltrim(A.PART)) + '{1}' as MATCH_1, rtrim(ltrim(A.PART)) + '{2}' as MATCH_2, rtrim(ltrim(A.PART)) + '{3}' as MATCH_3, rtrim(ltrim(A.PART)) +  '{4}' as MATCH_4, rtrim(ltrim(A.PART)) + '{5}' as MATCH_5, rtrim(ltrim(A.PART)) + '{6}' as MATCH_6, rtrim(ltrim(A.PART)) + '{7}' as MATCH_7, rtrim(ltrim(A.PART)) + '{8}' as MATCH_8, rtrim(ltrim(A.PART)) + '{9}' as MATCH_9, rtrim(ltrim(A.PART)) + '{10}' as MATCH_10, rtrim(ltrim(A.PART)) + '{11}' as MATCH_11 from INVENTORY_MSTR A where CODE_EXCEPTION = 'B'", V.Dictionary.dictMonthOffset!0, V.Dictionary.dictMonthOffset!1, V.Dictionary.dictMonthOffset!2, V.Dictionary.dictMonthOffset!3, V.Dictionary.dictMonthOffset!4, V.Dictionary.dictMonthOffset!5, V.Dictionary.dictMonthOffset!6, V.Dictionary.dictMonthOffset!7, V.Dictionary.dictMonthOffset!8, V.Dictionary.dictMonthOffset!9, V.Dictionary.dictMonthOffset!10, V.Dictionary.dictMonthOffset!11, V.Local.sSQLA)
+	
+	'NAME_VENDOR here is VENDOR number. This is the vendor sort field in inv master
+	V.Local.sSQLB.Set("select rtrim(ltrim(B.PART)) as PART_REV, ltrim(rtrim(B.NAME_VENDOR)) as VENDOR from INVENTORY_MST2 B")
+	V.Local.sSQLC.Set("select ltrim(rtrim(C.NAME_VENDOR)) as VENDOR_NAME, C.VENDOR from V_VENDOR_MASTER C")
+	
+	F.ODBC.Connection!con.OpenCompanyConnection
+	
+	F.Data.DataTable.CreateFromSQL("dtTempA", "con", V.Local.sSQLA)
+	F.Data.DataTable.CreateFromSQL("dtTempB", "con", V.Local.sSQLB)
+	F.Data.DataTable.CreateFromSQL("dtTempC", "con", V.Local.sSQLC)
+
+	F.Data.Linq.Join(V.Enum.LinqJoinType!LeftJoin, V.Enum.LinqSourceType!DataTable, "dtTempA*!*A", V.Enum.LinqSourceType!DataTable, "dtTempB*!*B", "A.PART_REV = B.PART_REV", V.Enum.LinqSourceType!DataTable, "dtTempC*!*C", "B.VENDOR = C.VENDOR", "A.PART_REV*!*A.DESCRIPTION*!*B.VENDOR*!*C.VENDOR_NAME*!*A.LEAD_TIME*!*A.ON_HAND*!*A.SUPPLIER_STOCK*!*A.MATCH_0*!*A.MATCH_1*!*A.MATCH_2*!*A.MATCH_3*!*A.MATCH_4*!*A.MATCH_5*!*A.MATCH_6*!*A.MATCH_7*!*A.MATCH_8*!*A.MATCH_9*!*A.MATCH_10*!*A.MATCH_11", "", "", "B.VENDOR asc", "dtData", True)
+	
+	F.Data.DataTable.Close("dtTempA")
+	F.Data.DataTable.Close("dtTempB")
+	F.Data.DataTable.Close("dtTempC")
+	
+	'Now grab each of the next 12 months' inventory parts usage data to add to datatable
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		Gui.frmBondParts.GSGCBondParts.UpdateWait("Loading Monthly Forecast Numbers...", "Please Wait")
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.CallSub(LoadMonthlyForecasts)
+	
+	'Add support for long part if they use that
+	F.Intrinsic.Control.If(V.Global.bLongPart)
+		F.Data.DataTable.AddDisplayPartColumn("dtData", V.Enum.LongPartType!Part, "PART_REV", "PART", "REV")
+	F.Intrinsic.Control.Else
+		F.Data.DataTable.AddExpressionColumn("dtData", "PART", "String", "TRIM(SUBSTRING([PART_REV], 1, 17))")
+		F.Data.DataTable.AddExpressionColumn("dtData", "REV", "String", "TRIM(SUBSTRING([PART_REV], 18, 3))")
+	F.Intrinsic.Control.EndIf
+	
+	
+	'Now read the excel sheet and extract supplier stock
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		Gui.frmBondParts.GSGCBondParts.UpdateWait("Loading Supplier Stock Numbers...", "Please Wait")
+	F.Intrinsic.Control.EndIf
+	
+	'Create datatable that houses all possible bonded part suppliers. Exclude vendor 000000 since that is Progressive dynamics themselves
+	F.Data.DataView.Create("dtData", "dvSuppliers", 22, "VENDOR <> '000000'", "")
+	F.Data.DataView.ToDataTableDistinct("dtData", "dvSuppliers", "dtSuppliers", "VENDOR*!*VENDOR_NAME", True)
+	F.Data.DataView.Close("dtData", "dvSuppliers")
+	
+	
+	F.Intrinsic.Control.CallSub(ReadSupplierStock)
+	
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		Gui.frmBondParts.GSGCBondParts.UpdateWait("Formatting Grid...", "Please Wait")
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.CallSub(SaveGridToFile)
+	
+		
+	'Remove temp columns that are no longer needed 
+	F.Intrinsic.Control.If(V.Global.bNoVisuals.Not)
+		F.Intrinsic.Control.CallSub("LoadGV", "DT", "dtData", "GV", "gvData", "GSGC", "GSGCBondParts", "FRM", "frmBondParts")
+		Gui.frmBondParts.GSGCBondParts.HideWait()
+	F.Intrinsic.Control.EndIf
+	
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadDT.End
+
+Program.Sub.LoadGV.Start
+F.Intrinsic.Control.Try
+	V.Local.sFieldNames.Declare
+	V.Local.sColumns.Declare
+	V.Local.bRet.Declare
+	V.Local.sFormattedCaption.Declare
+	V.Local.iVisibleIndex.Declare(Long)
+	V.Local.sFRM.Declare
+	V.Local.sGSGC.Declare
+	V.Local.sGV.Declare
+	V.Local.sDT.Declare
+	V.Local.iCnt.Declare
+	V.Local.sColumnName.Declare
+
+	'Load datatable into gridview and start formatting
+	Gui.[V.Args.FRM].[V.Args.GSGC].AddGridViewFromDataTable(V.Args.GV,V.Args.DT)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SuspendLayout()
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV,"AllowSort",True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV,"AllowFilter",True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV,"OptionsViewShowGroupPanel",True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV, V.Enum.GridViewPropertyNames!EnableAppearanceOddRow,True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV, V.Enum.GridViewPropertyNames!FindAlwaysVisible,True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridViewProperty(V.Args.GV, V.Enum.GridViewPropertyNames!ShowAutoFilterRow,True)
+
+'Format GridView properties
+
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridviewProperty(V.Args.GV,  V.Enum.GridViewPropertyNames!ColumnAutoWidth, True)
+	Gui.[V.Args.FRM].[V.Args.GSGC].SetGridviewProperty(V.Args.GV, V.Enum.GridViewPropertyNames!ShowDetailTabs, False)
+	
+	'Loop through columns names by using the V.DataTable.dtName.FieldNames
+	V.Local.sFieldNames.Set(V.DataTable.[V.Args.DT].FieldNames)
+	F.Intrinsic.String.Split(V.Local.sFieldNames,"*!*",V.Local.sColumns)
+	
+	F.Intrinsic.Control.For(V.Local.iCnt, 0, V.Local.sColumns.UBound, 1)
+		'Caption Formatting...  returns V.Args.sFromattedCaption with the formatted caption
+		V.Local.sColumnName.Set(V.Local.sColumns(V.Local.iCnt))
+		F.Intrinsic.Control.CallSub(FormatCaption,"sCaption",V.Local.sColumnName)
+		
+		'Hide columns, SO_QTY_X and WO_QTY_X
+		F.Intrinsic.Control.SelectCase(V.Local.sColumnName.Left6)
+			F.Intrinsic.Control.CaseAny("SO_QTY", "WO_QTY", "FORECA","MATCH_", "PART_R")
+				Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName, V.Enum.ColumnPropertyNames!Visible, False)
+				F.Intrinsic.Control.GoTo("NEXT")
+			F.Intrinsic.Control.CaseAny("PART", "REV")
+				Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"VisibleIndex",V.Local.iCnt)
+		F.Intrinsic.Control.EndSelect
+		
+		'Main Properties
+		F.Intrinsic.Control.If(V.Local.sColumnName, =, "PART")
+			Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"VisibleIndex", 0)
+		F.Intrinsic.Control.ElseIf(V.Local.sColumnName, =, "REV")
+			Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"VisibleIndex", 1)
+		F.Intrinsic.Control.Else
+			Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"VisibleIndex",V.Local.iCnt)
+		F.Intrinsic.Control.EndIf
+		
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"HeaderFontBold",True)
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"HeaderHAlignment","Left")
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"CellHAlignment","Left")
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"ReadOnly",True)
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"AllowEdit",False)
+		Gui.[V.Args.FRM].[V.Args.GSGC].SetColumnProperty(V.Args.GV,V.Local.sColumnName,"Caption",V.Args.sFormattedCaption)
+		
+		F.Intrinsic.Control.Label("NEXT")
+	F.Intrinsic.Control.Next(V.Local.iCnt)
+	
+	Gui.[V.Args.FRM].[V.Args.GSGC].BestFitColumns(V.Args.GV)
+	Gui.[V.Args.FRM].[V.Args.GSGC].ResumeLayout()
+	Gui.[V.Args.FRM].[V.Args.GSGC].MainView(V.Args.GV)
+	
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadGV.End
+
+Program.Sub.FormatCaption.Start
+F.Intrinsic.Control.Try
+	'Sub just removes underscores of captions passed to it and makes columns proper case. Returns RV where formatted. Also sets captions of months depending on current month
+	V.Local.sRet.Declare
+	V.Local.sTemp.Declare
+	V.Local.sDateRet.Declare
+	V.Local.sMonthNum.Declare
+	V.Local.sYear.Declare
+	
+	V.Local.sRet.Set(V.Args.sCaption)
+	
+	F.Intrinsic.Control.If(V.Local.sRet.Left5, =, "MONTH")
+
+		F.Intrinsic.String.Split(V.Local.sRet, "_", V.Local.sTemp)
+		'sTemp(0) = 'MONTH' sTemp(1) = '{Num}'
+		
+		'Use dictMonthOffset to change value of current month to 0, and so on for the other months	
+		V.Local.sRet.Set(V.Dictionary.dictMonthNames![V.Dictionary.dictMonthOffset![V.Local.sTemp(1)]])
+	
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Replace(V.Local.sRet,"_"," ",V.Local.sRet)
+		V.Local.sRet.Set(V.Local.sRet.PCase)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Variable.AddRV("sFormattedCaption",V.Local.sRet)
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.FormatCaption.End
+
+Program.Sub.LoadMonthlyForecasts.Start
+F.Intrinsic.Control.Try
+	V.Local.sSQLA.Declare
+	V.Local.sSQLB.Declare
+	V.Local.sSQLC.Declare
+	V.Local.sSQLD.Declare
+	V.Local.iMonthCnt.Declare
+	V.Local.sMatchFilter.Declare
+	V.Local.sColumnFillName.Declare
+	V.Local.i.Declare
+	V.Local.sColumnNameToAdd.Declare
+	V.Local.sExpression.Declare
+	V.Local.sColumnNameToDelete.Declare
+	
+	'Subroutine will create the main dt with monthly buckets 
+	'Add temp columns to accept SO, WO and forecast qtys. Later on, these 2 columns will be made into expression column to add up value for each part + month pair
+	'Add in the permanent Monthly qty bucket columns as well
+	F.Intrinsic.Control.For(V.Local.i, 0, 11, 1)
+		F.Intrinsic.String.Concat("SO_QTY_", V.Local.i, V.Local.sColumnNameToAdd)
+		F.Data.DataTable.AddColumn("dtData", V.Local.sColumnNameToAdd, "Float")
+		F.Intrinsic.String.Concat("WO_QTY_", V.Local.i, V.Local.sColumnNameToAdd)
+		F.Data.DataTable.AddColumn("dtData", V.Local.sColumnNameToAdd, "Float")
+		F.Intrinsic.String.Concat("FORECAST_QTY_", V.Local.i, V.Local.sColumnNameToAdd)
+		F.Data.DataTable.AddColumn("dtData", V.Local.sColumnNameToAdd, "Float")
+	F.Intrinsic.Control.Next(V.Local.i)
+	
+	'Gather qtys of all 12 monthly buckets. Should only grab from Sales Orders and Work Orders. When part is shipped, it drops off SO line
+	'A: V_ORDER_LINES
+	'B: V_JOB_OPERATIONS
+	'C: INVENTORY_MSTR
+	'D: V_FORECAST_REQ
+	
+	'Part 0025 on SO 0000201 line 0010 date_item_prom from 20100202 to 20240202
+	F.Intrinsic.String.Build("select ltrim(rtrim(A.PART)) as PART, SUM(A.QTY_BO) as QTY, MONTH(A.DATE_ITEM_PROM) as DUE_DATE_MONTH from V_ORDER_LINES A inner join INVENTORY_MSTR C on A.PART = C.PART where A.DATE_ITEM_PROM >= '{0}' and C.CODE_EXCEPTION = 'B' group by A.PART, DUE_DATE_MONTH", V.Ambient.Date.FormatYYYY-MM-DD, V.Local.sSQLA)
+	
+	'Part 0025 on JOB 000155-001 changed DATE_DUE from 020210 to 020224
+	F.Intrinsic.String.Build("select ltrim(rtrim(B.PART)) as PART, SUM(B.HOURS_ESTIMATED) as QTY, MONTH(B.DATE_DUE) as DUE_DATE_MONTH from V_JOB_OPERATIONS B inner join INVENTORY_MSTR C on B.PART = C.PART where B.DATE_DUE >= '{0}' and C.CODE_EXCEPTION = 'B' and FLAG_CLOSED <> 'Y' group by B.PART, DUE_DATE_MONTH", V.Ambient.Date.FormatYYYY-MM-DD, V.Local.sSQLB)
+	
+	F.Intrinsic.String.Build("select ltrim(rtrim(D.FO_PART)) as PART, SUM(D.FO_QTY_ORD) as QTY, MONTH(D.FO_DATE_DUE) as DUE_DATE_MONTH from V_FORECAST_REQ D inner join INVENTORY_MSTR C on D.FO_PART = C.PART where D.FO_DATE_DUE >= '{0}' and C.CODE_EXCEPTION = 'B' group by FO_PART, DUE_DATE_MONTH", V.Ambient.Date.FormatYYYY-MM-DD, V.Local.sSQLD)
+	
+	'Gather qtys for SOs and WOs 
+	F.Data.DataTable.CreateFromSQL("dtSOQuantities", "con", V.Local.sSQLA)
+	F.Data.DataTable.CreateFromSQL("dtWOQuantities", "con", V.Local.sSQLB)
+	F.Data.DataTable.CreateFromSQL("dtForeCastQuantities", "con", V.Local.sSQLD)
+	
+	'Add expression column as value to match on for fillfromdictionary  
+	F.Data.DataTable.AddExpressionColumn("dtSOQuantities", "MATCH", "String", "[PART] + [DUE_DATE_MONTH]")
+	F.Data.DataTable.AddExpressionColumn("dtWOQuantities", "MATCH", "String", "[PART] + [DUE_DATE_MONTH]")
+	F.Data.DataTable.AddExpressionColumn("dtForeCastQuantities", "MATCH", "String", "[PART] + [DUE_DATE_MONTH]")
+	
+	'Now loop and create dictionaries for each month and fill in dtData. Key: [PART] + [MONTH_X] Value: Qty
+		'Month_X is month number ahead of current month, where current month is 0. Use dictMonthOffset created in preflight
+	
+	F.Data.Dictionary.CreateFromDataTable("dictSOQty", "dtSOQuantities", "MATCH", "QTY")
+	F.Data.Dictionary.CreateFromDataTable("dictWOQty", "dtWOQuantities", "MATCH", "QTY")
+	F.Data.Dictionary.CreateFromDataTable("dictForecastQty", "dtForeCastQuantities", "MATCH", "QTY")
+	
+	F.Data.Dictionary.SetDefaultReturn("dictSOQty", "0")
+	F.Data.Dictionary.SetDefaultReturn("dictWOQty", "0")
+	F.Data.Dictionary.SetDefaultReturn("dictForecastQty", "0")
+		
+	'Loop and fill out each month qty column (SO, WO & forecast) 
+	F.Intrinsic.Control.For(V.Local.iMonthCnt, 0, 11, 1)
+		F.Intrinsic.String.Build("MATCH_{0}", V.Local.iMonthCnt, V.Local.sMatchFilter)
+		
+		F.Intrinsic.String.Build("SO_QTY_{0}", V.Local.iMonthCnt, V.Local.sColumnFillName)
+		F.Data.DataTable.FillFromDictionary("dtData", "dictSOQty", V.Local.sMatchFilter, V.Local.sColumnFillName)
+		V.Local.sExpression.Set(V.Local.sColumnFillName)
+	
+		F.Intrinsic.String.Build("WO_QTY_{0}", V.Local.iMonthCnt, V.Local.sColumnFillName)
+		F.Data.DataTable.FillFromDictionary("dtData", "dictWOQty", V.Local.sMatchFilter, V.Local.sColumnFillName)
+		F.Intrinsic.String.Build("[{0}] + [{1}] + ", V.Local.sExpression, V.Local.sColumnFillName, V.Local.sExpression)
+		
+		F.Intrinsic.String.Build("FORECAST_QTY_{0}", V.Local.iMonthCnt, V.Local.sColumnFillName)
+		F.Data.DataTable.FillFromDictionary("dtData", "dictForecastQty", V.Local.sMatchFilter, V.Local.sColumnFillName)
+		F.Intrinsic.String.Build("{0}[{1}]", V.Local.sExpression, V.Local.sColumnFillName, V.Local.sExpression)
+		
+		'Add Expression column summing SO and WO qty. This is the final monthly bucket
+		F.Intrinsic.String.Concat("MONTH_", V.Local.iMonthCnt, V.Local.sColumnNameToAdd)
+		F.Data.DataTable.AddExpressionColumn("dtData", V.Local.sColumnNameToAdd, "Float", V.Local.sExpression)
+	F.Intrinsic.Control.Next(V.Local.iMonthCnt)
+
+	F.Data.Dictionary.Close("dictSOQty")
+	F.Data.Dictionary.Close("dictWOQty")
+	F.Data.Dictionary.Close("dictForecastQty")
+	F.Data.DataTable.Close("dtSOQuantities")
+	F.Data.DataTable.Close("dtWOQuantities")
+	F.Data.DataTable.Close("dtForeCastQuantities")
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.LoadMonthlyForecasts.End
+
+Program.Sub.ReadSupplierStock.Start
+F.Intrinsic.Control.Try
+	V.Local.sCSVDirectory.Declare
+	V.Local.sCSVFilePath.Declare
+	V.Local.bPathExists.Declare
+	V.Local.sCSVFilesArray.Declare
+	V.Local.iFileCnt.Declare
+	V.Local.bFileExists.Declare
+	V.Local.iCnt.Declare
+	V.Local.sVendorName.Declare
+	V.Local.sVendorNum.Declare
+	V.Local.bIsCSV.Declare
+	V.Local.sFileExt.Declare
+	
+	
+	'Create the translation file. If it exists, then set the global variable
+	F.Intrinsic.String.Build("{0}\CUSTOM\7380\TranslationFile\GCG_7380_VendorTranslation.txt", V.Caller.GlobalDir, V.Global.sTranslationFile)
+	F.Intrinsic.File.Exists(V.Global.sTranslationFile, V.Local.bFileExists)
+	F.Intrinsic.Control.If(V.Local.bFileExists.Not)
+		F.Intrinsic.Control.For(V.Local.iCnt, 0, V.DataTable.dtSuppliers.RowCount--, 1)
+			V.Local.sVendorNum.Set(V.DataTable.dtSuppliers(V.Local.iCnt).VENDOR!FieldValTrim)
+			'Add Vendor to the file if it didn't already exist
+			F.Intrinsic.Control.If(V.Local.iCnt, =, 0, AND, V.Local.bFileExists, =, False)
+				F.Intrinsic.String.Build("|{0}|0|", V.Local.sVendorNum, V.Global.sTranslationFileContents)
+			F.Intrinsic.Control.ElseIf(V.Local.bFileExists.Not)
+				F.Intrinsic.String.Build("{0}{1}|{2}|0|", V.Global.sTranslationFileContents, V.Ambient.NewLine, V.Local.sVendorNum, V.Global.sTranslationFileContents)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iCnt)
+		F.Intrinsic.File.String2File(V.Global.sTranslationFile, V.Global.sTranslationFileContents)
+	F.Intrinsic.Control.EndIf	
+	
+	F.Intrinsic.File.FileToStringArray(V.Global.sTranslationFile, V.Ambient.NewLine, V.Global.sTranslationFileContents)
+	
+	'Also create where emailed files will be housed 
+	F.Intrinsic.String.Build("{0}\CUSTOM\7380\EmailedFiles", V.Caller.GlobalDir, V.Local.sCSVDirectory)
+	F.Intrinsic.File.DirExists(V.Local.sCSVDirectory, V.Local.bPathExists)
+	
+	F.Intrinsic.Control.If(V.Local.bPathExists.Not)
+		F.Intrinsic.File.CreateDir(V.Local.sCSVDirectory)
+	F.Intrinsic.Control.EndIf
+	
+	'Look in the custom file directory to find csv files. This is where the supplier stocks will come from
+	F.Intrinsic.String.Build("{0}\CUSTOM\7380\SupplierFiles\", V.Caller.GlobalDir, V.Local.sCSVDirectory)
+	F.Intrinsic.File.DirExists(V.Local.sCSVDirectory, V.Local.bPathExists)
+	
+	F.Intrinsic.Control.If(V.Local.bPathExists.Not)
+		F.Intrinsic.File.CreateDir(V.Local.sCSVDirectory)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.File.GetFileList(V.Local.sCSVDirectory, V.Local.sCSVFilesArray)
+	F.Intrinsic.String.Split(V.Local.sCSVFilesArray, ":", V.Local.sCSVFilesArray)
+	
+	F.Intrinsic.Control.For(V.Local.iFileCnt, 0, V.Local.sCSVFilesArray.UBound, 1)
+		'Check that the file type is CSV and if not then skip
+
+		F.Intrinsic.File.GetExtensionComponent(V.Local.sCSVFilesArray(V.Local.iFileCnt), V.Local.sFileExt)
+		F.Intrinsic.Control.If(V.Local.sFileExt.UCase, <>, "CSV")
+			F.Intrinsic.Control.GoTo("NEXT1")
+		F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.String.Build("{0}{1}", V.Local.sCSVDirectory, V.Local.sCSVFilesArray(V.Local.iFileCnt), V.Local.sCSVFilePath)
+		'Fills in supplier stock for csv being processed
+		F.Intrinsic.Control.CallSub(CreateDTFromCSV, "CSV", V.Local.sCSVFilesArray(V.Local.iFileCnt), "CSVFILEPATH", V.Local.sCSVFilePath)
+		F.Intrinsic.Control.Label("NEXT1")
+	F.Intrinsic.Control.Next(V.Local.iFileCnt)
+	
+	
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.ReadSupplierStock.End
+
+Program.Sub.CreateDTFromCSV.Start
+F.Intrinsic.Control.Try
+	V.Local.sError.Declare(String)
+	V.Local.sCSV.Declare
+	V.Local.sCSVFilePath.Declare
+	V.Local.bFileMatch.Declare
+	V.Local.iCnt.Declare
+	V.Local.sVendorName.Declare
+	V.Local.sVendorFileMatch.Declare
+	V.Local.sVendorNum.Declare
+	V.Local.sColumnDataTypes.Declare
+	V.Local.sColumnNames.Declare
+	V.Local.sCSVContent.Declare
+	V.Local.bFileExists.Declare
+	V.Local.sTransFileRow.Declare
+	V.Local.iFileType.Declare
+	V.Local.sFilter.Declare
+		
+	'Read passed csv file to create DT. Creation/processing of the file will depend on which supplier it is coming from, as they all have different file formats. 
+	V.Local.sCSV.Set(V.Args.CSV)
+	V.Local.sCSVFilePath.Set(V.Args.CSVFILEPATH)
+	
+	'Determine which file it is. Vendor Translation file should contain all intial vendors, and will need to be maintained by customer. 
+	'Each line is: Vendor (What Customer Calls them)|Vendor Num| Type Number (0 means it has not been setup yet)|Vendor_Recipient_1@!@Vendor Email_1*!*Vendor_Recipient_2@!@Vendor Email_2 (optional)
+	F.Intrinsic.Control.For(V.Local.iCnt, 0, V.Global.sTranslationFileContents.UBound, 1)
+		F.Intrinsic.String.Split(V.Global.sTranslationFileContents(V.Local.iCnt), "|", V.Local.sTransFileRow)
+		V.Local.sVendorFileMatch.Set(V.Local.sTransFileRow(0))
+		V.Local.sVendorNum.Set(V.Local.sTransFileRow(1))
+		
+		F.Intrinsic.String.IsInString(V.Local.sCSV, V.Local.sVendorFileMatch, True, V.Local.bFileMatch)
+		F.Intrinsic.Control.If(V.Local.bFileMatch)
+			V.Local.iFileType.Set(V.Local.sTransFileRow(2))
+			F.Intrinsic.Control.GoTo("MATCH")
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iCnt)
+
+	F.Intrinsic.Control.ExitSub
+	
+	F.Intrinsic.Control.Label("MATCH")
+	
+		
+	'Grab the csv headers 
+	F.Intrinsic.File.File2String(V.Local.sCSVFilePath, V.Local.sCSVContent)
+	F.Intrinsic.String.Split(V.Local.sCSVContent, V.Ambient.NewLine, V.Local.sCSVContent)
+	F.Intrinsic.String.Split(V.Local.sCSVContent(0), ",", V.Local.sColumnNames)
+	
+	'Make all columns in dt string type since row 0 will always be the headers 
+	F.Intrinsic.Control.For(V.Local.iCnt, 0, V.Local.sColumnNames.UBound, 1)
+		F.Intrinsic.Control.If(V.Local.iCnt, =, 0)
+			V.Local.sColumnDataTypes.Set("String")
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0}*!*{1}", V.Local.sColumnDataTypes, "String", V.Local.sColumnDataTypes)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iCnt)
+		
+	F.Intrinsic.String.Join(V.Local.sColumnNames, "*!*", V.Local.sColumnNames)
+	F.Data.DataTable.CreateFromCSV("dtSupplierStock", V.Local.sCSVFilePath,  V.Local.sColumnNames, V.Local.sColumnDataTypes, True)
+			
+	'Now delete the headers
+	F.Data.DataTable.DeleteRow("dtSupplierStock", 0)
+	
+	'Go about creating a DT from the csv depending on if it's meritek or any other supplier. They both have different file formats
+	'read everything in as strings since the headers are being read. Using floats throws an error 21050 since the header is not a float
+	F.Intrinsic.Control.SelectCase(V.Local.iFileType)
+		'Format FUTURE Uses with 6 columns ItemNumber MfrPartNum Mfr ATS_NA	BondQtyAlloc RUNDATE. Most other suppliers will be expected to use this format
+		F.Intrinsic.Control.Case(1)
+			F.Data.Dictionary.CreateFromDataTable("dictSupplierStock", "dtSupplierStock", "ItemNumber", "BondQtyAlloc", 4)
+		'Format Meritek Used to use with 7 new columns added to the end of the forecast excel they used to send. Has 42 columns, adds 7 at the end of the forecast they send to them. Those are Meritek*!*On VMI?*!*VMI Qty*!*QOH Reserve*!*Leadtimes*!*Recommended VMI Qty based on LT*!*STATUS
+		F.Intrinsic.Control.Case(2)
+			F.Data.DataTable.AddExpressionColumn("dtSupplierStock", "PART_MATCH", "String", "Trim([PART]) + Trim(ISNULL([REV], ''))")
+			F.Data.Dictionary.CreateFromDataTable("dictSupplierStock", "dtSupplierStock", "PART_MATCH", "QOH Reserve", 4)
+		
+		'Same as above but this is what is anticipated will be sent by Meritek when they add the 7 new columns at the end of the excel sheet that will be sent by this project. New Columns are called the same thing
+		F.Intrinsic.Control.Case(3)
+			F.Data.DataTable.AddExpressionColumn("dtSupplierStock", "PART_MATCH", "String", "Trim([PART]) + Trim(ISNULL([REV], ''))")
+			F.Data.Dictionary.CreateFromDataTable("dictSupplierStock", "dtSupplierStock", "PART_MATCH", "QOH Reserve", 4)
+		F.Intrinsic.Control.CaseElse
+			F.Data.DataTable.Close("dtSupplierStock")
+			F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndSelect
+	
+	F.Data.Dictionary.SetDefaultReturn("dictSupplierStock", "0")
+	
+	'Fill out Supplier Stock column only for the records that match the current vendor number 
+	F.Intrinsic.String.Build("VENDOR = '{0}'", V.Local.sVendorNum, V.Local.sFilter)
+	
+	'Create temp part-rev match column in dtdata  
+	F.Data.DataTable.AddExpressionColumn("dtData", "PART_MATCH", "String", "Trim([PART]) + Trim(ISNULL([REV], ''))")
+	F.Data.DataView.Create("dtData", "dvVendorFillSupplierStock", 22, V.Local.sFilter, "")
+	F.Data.DataView.FillFromDictionary("dtData", "dvVendorFillSupplierStock", "dictSupplierStock", "PART_MATCH", "SUPPLIER_STOCK") 
+	F.Data.DataTable.RemoveColumn("dtData", "PART_MATCH")
+		
+	'Close created dt, dv and dictionary 
+	F.Data.DataTable.Close("dtSupplierStock")
+	F.Data.Dictionary.Close("dictSupplierStock")
+	F.Data.DataView.Close("dtData", "dvVendorFillSupplierStock")
+	
+	F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.CatchWhen(5116)
+	'Means an invalid array element was passed, likely in the .txt file parsing
+	F.Intrinsic.UI.Msgbox("File Type integer missing in GCG_7380_VendorTranslation.txt", "Missing File Type")
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.CreateDTFromCSV.End
+
+Program.Sub.SendEmail.Start
+F.Intrinsic.Control.Try
+	V.Local.iTxtRow.Declare
+	V.Local.sFileRowContents.Declare
+	V.Local.sUsersFullName.Declare
+	V.Local.sUsers.Declare
+	V.Local.sUsersSQL.Declare
+	V.Local.sUserEmails.Declare
+	V.Local.sAllRecipients.Declare
+	V.Local.sSQL.Declare
+	V.Local.iReturnCode.Declare
+	V.Local.sRet.Declare
+	V.Local.sMsg.Declare
+	V.Local.sUserID.Declare
+	V.Local.sSenderEmail.Declare
+	V.Local.sSubject.Declare
+	V.Local.iSupplierEmailCnt.Declare
+	V.Local.sRecipientArray.Declare
+	V.Local.iRecipientEmailCnt.Declare
+	V.Local.sVendorRowContents.Declare
+	V.Local.sVendorMatch.Declare
+	V.Local.sVendorName.Declare
+	V.Local.sVendorNum.Declare
+	V.Local.sFilter.Declare
+	V.Local.sCSVFileInfo.Declare
+	
+	V.Local.sSenderEmail.Set("purchasing@progressivedyn.com*!*Barb Starr")
+	
+	'Check Courier 3 is Running
+	F.Global.Messaging.IsCourierRunning(V.Local.iReturnCode)
+	F.Intrinsic.Control.If(V.Local.iReturnCode, <>, 3)
+		F.Intrinsic.UI.Msgbox("Courier 3 is not running. Please start up this service and try again", "Courier Not Running")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	'Get User ID
+	F.Intrinsic.String.Build("select USER_ID from USER_INFORMATION where GS_USER = '{0}'", V.Caller.User, V.Local.sSQL)
+	F.ODBC.Connection!conx.OpenCommonConnection
+	F.ODBC.Connection!conx.ExecuteAndReturn(V.Local.sSQL, V.Local.sUserID)
+	F.ODBC.Connection!conx.Close
+	
+	'Loop through translation file.txt to get list of each vendor to email (each email should only have entries with their vendor info on it)
+
+	
+	'Within the txt file, each iteration is a vendor
+	F.Intrinsic.Control.For(V.Local.iTxtRow, 0, V.Global.sTranslationFileContents.UBound, 1)
+		V.Local.sVendorRowContents.Redim(0,0)
+		F.Intrinsic.String.Split(V.Global.sTranslationFileContents(V.Local.iTxtRow), "|", V.Local.sVendorRowContents)
+		'sVendorRowContents: 0: Name 1: Vendor Name (As in GS) 2:File type 3: double delimited string of Recipient name and emails
+		V.Local.sVendorMatch.Set(V.Local.sVendorRowContents(0))
+		V.Local.sVendorNum.Set(V.Local.sVendorRowContents(1))
+		F.Intrinsic.String.Build("{0} - {1}", "Progressive Dynamics Forecast File", V.Local.sVendorMatch, V.Local.sSubject)
+		
+		V.Local.sAllRecipients.Redim(0,0)
+		'Every vendor will have @!@ delimited list of RecipientName*!*RecipientEmail@!@....
+		V.Local.sAllRecipients.Set(V.Local.sVendorRowContents(3))
+		
+		'Now filter the main dt to only get the data for current vendor
+		F.Intrinsic.String.Build("VENDOR = '{0}'", V.Local.sVendorNum, V.Local.sFilter)
+		F.Data.DataView.Create("dtData", "dvVendorFilter", 22, V.Local.sFilter, "")
+		F.Data.DataView.ToDataTable("dtData", "dvVendorFilter", "dtVendorFilter", True)
+		
+		'Send it to the grid view (which is invisible). This is so we can repurpose the csv export subroutine and only shows the desired columns. 
+		'Only send non empty grids and if vendor email is found in file		
+		F.Intrinsic.Control.If(V.DataTable.dtVendorFilter.RowCount, <>, 0, AND, V.Local.sAllRecipients, <>, "")
+			F.Intrinsic.Control.CallSub("LoadGV", "DT", "dtVendorFilter", "GV", "gvData", "GSGC", "GSGCBondParts", "FRM", "frmBondParts")
+			
+			F.Intrinsic.Control.CallSub(ExportGridToCSV, "VENDOR_MATCH", V.Local.sVendorMatch)
+			V.Local.sCSVFileInfo.Set(V.Args.CSVEXPORT)
+		
+			'cCSVFileInfo 0:File Name 1:FQP
+			F.Global.Messaging.QueueMessage(V.Caller.CompanyCode, V.Local.sUserID, "GCG_7380_Bonded_Parts", V.Local.sSubject, V.Local.sSenderEmail, V.Local.sAllRecipients, "Attached is our latest forecast file", 5, "purchasing@progressivedyn.com", False, "", "", "", "", "", "", "", V.Local.sCSVFileInfo, False, "")
+		F.Intrinsic.Control.EndIf
+		
+		F.Data.DataView.Close("dtData", "dvVendorFilter")
+		F.Data.DataTable.Close("dtVendorFilter")
+	F.Intrinsic.Control.Next(V.Local.iTxtRow)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.SendEmail.End
+
+Program.Sub.SaveGridToFile.Start
+F.Intrinsic.Control.Try
+	V.Local.sDTSaveFile.Declare
+	V.Local.bFileExists.Declare
+
+	'Save dt to protobuf so that it can be read from APOG script. Updates hourly since this project runs hourly
+	F.Intrinsic.String.Build("{0}\{1}GCG_7380_Data.XML", V.Caller.FilesDir, V.Caller.CompanyCode, V.Local.sDTSaveFile)
+	F.Intrinsic.File.Exists(V.Local.sDTSaveFile, V.Local.bFileExists)
+	
+	F.Intrinsic.Control.If(V.Local.bFileExists)
+		F.Intrinsic.File.DeleteFile(V.Local.sDTSaveFile)
+	F.Intrinsic.Control.EndIf
+
+	F.Data.DataTable.SaveToXML("dtData", 0, False, V.Local.sDTSaveFile)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.SaveGridToFile.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8789.15319$}$1
+${$6$}$bmedina$}$20240214114119637$}$kOipCrsyLBVj2KoSwkcdK23ChxGVcBlEdSmQmnlNy+KmEjSNI/JnIteh9nPMg4Zs/Vdc2JPEBgA=
+Program.Sub.Comments.End
