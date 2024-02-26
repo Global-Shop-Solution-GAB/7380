@@ -1,0 +1,108 @@
+﻿Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+	
+	'Project should be on hooks 56300 & 56301 (APOG - New) Fires when program starts and when the data is populated 
+F.Intrinsic.Control.Try
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		F.Intrinsic.Control.CaseAny(56300, 56301)
+			F.Intrinsic.Control.CallSub(AddNewColumns)
+	F.Intrinsic.Control.EndSelect
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+
+
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Caller.ScriptFile , V.Ambient.Newline, V.Args.CurrentSub,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError)
+Program.Sub.Error.End
+
+Program.Sub.AddNewColumns.Start
+F.Intrinsic.Control.Try
+	V.Local.sColumnTitles.Declare
+	V.Local.bHasNewColumn.Declare
+	V.Local.sFile.Declare
+	V.Local.bFileExists.Declare
+	V.Local.iDvCnt.Declare
+	V.Local.dNewDate.Declare
+	V.Local.dCurrentDate.Declare
+	V.Local.iSupplierStock.Declare
+	
+	'Read BDF into a dt which syncs differences between them
+		
+	F.Intrinsic.BDF.Load("PartsGrid", "AutomatedPurchaseOrderGeneration-dgvAutoPO-bdf", True)
+	F.Intrinsic.BDF.ReadColumnTitle("PartsGrid", V.Local.sColumnTitles)
+	
+	'Check Supplier Stock Column Add Status
+	F.Intrinsic.String.IsInString(V.Local.sColumnTitles, "Supplier Stock", True, V.Local.bHasNewColumn)
+	F.Intrinsic.Control.If(V.Local.bHasNewColumn.Not)
+		F.Intrinsic.BDF.AddColumn("PartsGrid", "Supplier Stock", "String")
+	F.Intrinsic.Control.EndIf
+	'Do the same with Bonded Supplier Column 
+	F.Intrinsic.String.IsInString(V.Local.sColumnTitles, "Bonded Supplier", True, V.Local.bHasNewColumn)
+	F.Intrinsic.Control.If(V.Local.bHasNewColumn.Not)
+		F.Intrinsic.BDF.AddColumn("PartsGrid", "Bonded Supplier", "String")
+	F.Intrinsic.Control.EndIf
+	'Now Add in Bonded Buy By Column
+	F.Intrinsic.String.IsInString(V.Local.sColumnTitles, "Bonded Buy By", True, V.Local.bHasNewColumn)
+	F.Intrinsic.Control.If(V.Local.bHasNewColumn.Not)
+		F.Intrinsic.BDF.AddColumn("PartsGrid", "Bonded Buy By", "String")
+	F.Intrinsic.Control.EndIf
+	
+	'Read dt from XML from hourly task
+	F.Intrinsic.String.Build("{0}\{1}GCG_7380_Data.XML", V.Caller.FilesDir, V.Caller.CompanyCode, V.Local.sFile)
+	F.Intrinsic.File.Exists(V.Local.sFile, V.Local.bFileExists)
+	F.Intrinsic.Control.If(V.Local.bFileExists.Not)
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	F.Data.DataTable.CreateFromXML("dtData", V.Local.sFile, True)
+	
+	'Add the matching columns
+	F.Data.DataTable.AddExpressionColumn("dtData", "PART_MATCH", "String", "[PART] + '/' + ISNULL([REV], '')")
+	F.Data.Dictionary.CreateFromDataTable("dictBondedParts", "dtData", "PART_MATCH", "SUPPLIER_STOCK", 4)
+	F.Data.Dictionary.CreateFromDataTable("dictBondedSupplier", "dtData", "PART_MATCH", "VENDOR_NAME", 4)
+	
+	F.Data.Dictionary.SetDefaultReturn("dictBondedParts", "0")
+	F.Data.Dictionary.SetDefaultReturn("dictBondedSupplier", "0")
+	F.Data.DataTable.FillFromDictionary("PartsGrid", "dictBondedParts", "PartRev", "Supplier Stock")
+	F.Data.DataTable.FillFromDictionary("PartsGrid", "dictBondedSupplier", "PartRev", "Bonded Supplier")
+	
+	F.Data.Dictionary.Close("dictBondedParts")
+	F.Data.Dictionary.Close("dictBondedSupplier")
+	F.Data.DataTable.Close("dtData")
+	
+	'Now filter bdf dt to only include those records that have a supplier stock value other than blank or 0
+	'Filtering a dt created from a bdf with a dv doesn't seem to work. So since we're looping anyway, check conditions and fill if requirements are met
+
+	'Now set Bonded Buy by date by subtracting 28 days from the value in due date column if there's a bonded supplier. No way to do this with expression column, so will need to do with looping 
+	
+	F.Intrinsic.Control.For(V.Local.iDvCnt, 0, V.DataTable.PartsGrid.RowCount--, 1)
+		V.Local.iSupplierStock.Set(V.DataTable.PartsGrid(V.Local.iDvCnt).Supplier Stock!FieldVal)
+		'V.Local.sSupplierStock.Set(v.Local.sSupplierStock.Trim)
+		
+		F.Intrinsic.Control.If(V.Local.iSupplierStock, <>, 0)
+			V.Local.dCurrentDate.Set(V.DataTable.PartsGrid(V.Local.iDvCnt).Due Date!FieldVal)
+			F.Intrinsic.Date.DateAdd("D", -28, V.Local.dCurrentDate, V.Local.dNewDate)
+			F.Data.DataTable.SetValue("PartsGrid", V.Local.iDvCnt, "Bonded Buy By", V.Local.dNewDate.FormatMM/DD/YYYY)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iDvCnt)
+	
+
+	F.Intrinsic.BDF.Save("PartsGrid", "AutomatedPurchaseOrderGeneration-dgvAutoPO-bdf")
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub("Error", CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.AddNewColumns.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8789.15319$}$1
+${$6$}$bmedina$}$20240214115403500$}$kOipCrsyLBVj2KoSwkcdK23ChxGVcBlEdSmQmnlNy+KmEjSNI/JnIs8Zo7B0ZTjr/jBimU9wV9U=
+Program.Sub.Comments.End
