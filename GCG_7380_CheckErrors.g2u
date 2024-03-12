@@ -1,0 +1,195 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sAdminFilePath.Declare
+V.Global.sAdminFileContents.Declare
+V.Global.sErrorFilePath.Declare
+V.Global.sErrorFileContents.Declare
+
+F.Intrinsic.String.Build("{0}\CUSTOM\7380\TranslationFile\", V.Caller.GlobalDir, V.Global.sAdminFilePath)
+F.Intrinsic.String.Build("{0}\CUSTOM\7380\ErrorLog.txt", V.Caller.GlobalDir, V.Global.sErrorFilePath)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Project: 7380: Bonded Parts Report
+'Author: Brandon Medina 
+'Customer: Progressive Dynamics Inc
+'Quote: 14452-0
+'Description: Script checks time stamp of latest error at top of log file and emails users. Runs daily at 10 am server time
+F.Intrinsic.Control.Try
+	F.Intrinsic.Control.CallSub(ReadAdminFile)
+	F.Intrinsic.Control.CallSub(EmailLog)
+	'F.Intrinsic.Control.CallSub(CleanUpOldEntries)
+
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Caller.ScriptFile , V.Ambient.Newline, V.Args.CurrentSub,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+
+F.Intrinsic.UI.Msgbox(V.Local.sError)
+Program.Sub.Error.End
+
+Program.Sub.EmailLog.Start
+'Check if latest error is within last 24 hours. If it is, email log to admin users set up in file
+F.Intrinsic.Control.Try
+	V.Local.sSenderEmail.Declare
+	V.Local.bExists.Declare
+	V.Local.sSQL.Declare
+	V.Local.sUserID.Declare
+	V.Local.sSubject.Declare
+	V.Local.sCheckContents.Declare
+	V.Local.sLatestDateStamp.Declare
+	V.Local.iDateDiff.Declare
+	V.Local.iReturnCode.Declare
+	V.Local.sFileName.Declare
+	V.Local.sAttachmentFile.Declare
+	V.Local.sErrorFileFolderPath.Declare
+	
+	V.Local.sSenderEmail.Set("automail1@progressivedyn.com*!*7380 Error")
+	V.Local.sSubject.Set("Error on DB server: Project 7380")
+	
+	'Check first entry to see if it's within last 24 hours 
+	F.Intrinsic.String.Split(V.Global.sErrorFileContents, V.Ambient.NewLine, V.Local.sCheckContents)
+	'sCheckContents is now array of strings with contents. Split 0th element (first line in log) with " " so that 0th element of new list is just date stamp 
+	F.Intrinsic.String.Split(V.Local.sCheckContents(0), " ", V.Local.sLatestDateStamp)
+	F.Intrinsic.Date.DateDiff("D", V.Ambient.Date, V.Local.sLatestDateStamp(0), V.Local.iDateDiff)
+
+	F.Intrinsic.Control.If(V.Local.iDateDiff, <, -1)
+		F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndIf
+	
+	'Ensure log file exists
+	F.Intrinsic.File.Exists(V.Global.sErrorFilePath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		F.Intrinsic.File.String2File(V.Global.sErrorFilePath, "")
+		F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndIf
+	
+	'Check Courier 3 is Running
+	F.Global.Messaging.IsCourierRunning(V.Local.iReturnCode)
+	F.Intrinsic.Control.If(V.Local.iReturnCode, <>, 3)
+		F.Intrinsic.UI.Msgbox("Courier 3 is not running. Please start up this service and try again", "Courier Not Running")
+		F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndIf
+	
+	'Get User ID
+	F.Intrinsic.String.Build("select USER_ID from USER_INFORMATION where GS_USER = '{0}'", V.Caller.User, V.Local.sSQL)
+	F.ODBC.Connection!conx.OpenCommonConnection
+	F.ODBC.Connection!conx.ExecuteAndReturn(V.Local.sSQL, V.Local.sUserID)
+	F.ODBC.Connection!conx.Close
+	
+	'QueueMessage needs Attachment file name *!* file path
+	F.Intrinsic.File.GetFileNameFromFQN(V.Global.sErrorFilePath, V.Local.sFileName)
+	F.Intrinsic.File.GetPathFromFQN(V.Global.sErrorFilePath, V.Local.sErrorFileFolderPath)
+	
+	F.Intrinsic.String.Build("{0}*!*{1}", V.Local.sFileName, V.Local.sErrorFileFolderPath, V.Local.sAttachmentFile)
+	
+	
+	F.Global.Messaging.QueueMessage(V.Caller.CompanyCode, V.Local.sUserID, "GCG_7380_Bonded_Parts", V.Local.sSubject, V.Local.sSenderEmail, V.Global.sAdminFileContents, "Attached is a copy of the error log file. Please address on the database server", 5, "", False, "", "", "", "", "", "", "", V.Local.sAttachmentFile, False, "")
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.EmailLog.End
+
+Program.Sub.CleanUpOldEntries.Start
+'Working backwards, checks oldest entries in the log file. If it is older than 2 weeks, deletes the entry 
+F.Intrinsic.Control.Try
+	V.Local.sCheckContents.Declare
+	V.Local.sCurrentEntry.Declare
+	V.Local.iEntryCnt.Declare
+	V.Local.sTimeStamp.Declare
+	V.Local.iAmtEntries.Declare
+	V.Local.iFinalEntries.Declare
+	V.Local.iDateDiff.Declare
+	V.Local.sDelimiter.Declare
+	
+	F.Intrinsic.String.Concat("------------------", V.Ambient.NewLine, V.Local.sDelimiter)
+	F.Intrinsic.String.Split(V.Global.sErrorFileContents, V.Local.sDelimiter, V.Local.sCheckContents)
+	V.Local.iAmtEntries.Set(V.Local.sCheckContents.UBound)
+	'V.Local.iAmtEntries.Set(V.Local.iAmtEntries.--)
+	V.Local.iFinalEntries.Set(V.Local.iAmtEntries)
+
+	F.Intrinsic.Control.If(V.Local.iAmtEntries, <, 0)
+		F.Intrinsic.Control.ExitSub
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.For(V.Local.iEntryCnt, V.Local.sCheckContents.UBound, 0, -1)
+		'Split current entry and get the time stamp 
+		V.Local.sCurrentEntry.Redim(0,0)
+		F.Intrinsic.String.Split(V.Local.sCheckContents(V.Local.iEntryCnt), V.Ambient.NewLine, V.Local.sCurrentEntry)
+		F.Intrinsic.String.Split(V.Local.sCurrentEntry, " ", V.Local.sCurrentEntry)
+		V.Local.sTimeStamp.Set(V.Local.sCurrentEntry(0))
+		F.Intrinsic.Date.DateDiff("D", V.Ambient.Date, V.Local.sTimeStamp, V.Local.iDateDiff)
+		'If older than a week, remove 1 from the array so we can trim it later to contain the correct amount of entries 
+		
+		F.Intrinsic.Control.If(V.Local.iDateDiff, <=, -14)
+			V.Local.iFinalEntries.Set(V.Local.iFinalEntries.--)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Next(V.Local.iEntryCnt)
+	
+	
+	'Check that new upper bound is not less than 0. This can happen if log only had 1 entry, doing a redim would throw error
+	F.Intrinsic.Control.If(V.Local.iFinalEntries, <, 0)
+		V.Local.sCheckContents.Redim(0,0)
+	F.Intrinsic.Control.Else
+		V.Local.sCheckContents.RedimPreserve(0, V.Local.iFinalEntries)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Join(V.Local.sCheckContents, V.Local.sDelimiter, V.Local.sCheckContents)
+	F.Intrinsic.File.String2File(V.Global.sErrorFilePath, V.Local.sCheckContents)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.CleanUpOldEntries.End
+
+Program.Sub.ReadAdminFile.Start
+F.Intrinsic.Control.Try
+	'See if admin file exists. If not create it and read emails that should receive daily error message emails 
+	V.Local.bExists.Declare
+	V.Local.bLocked.Declare
+	V.Local.sError.Declare
+	V.Local.sMsg.Declare
+	V.Local.sContents.Declare
+	
+	'Check directory
+	F.Intrinsic.File.DirExists(V.Global.sAdminFilePath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		F.Intrinsic.File.CreateDir(V.Global.sAdminFilePath)
+	F.Intrinsic.Control.EndIf
+	'Check File
+	F.Intrinsic.String.Build("{0}GCG_7380_ErrorAdmin.txt", V.Global.sAdminFilePath, V.Global.sAdminFilePath)
+	F.Intrinsic.File.Exists(V.Global.sAdminFilePath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		F.Intrinsic.File.String2File(V.Global.sAdminFilePath, "")
+		F.Intrinsic.String.Build("Please add at least one email to send 7380 error logs to{0}located at {1}", V.Ambient.NewLine, V.Global.sAdminFilePath, V.Local.sMsg)
+		F.Intrinsic.UI.Msgbox(V.Local.sMsg, "No emails in ErrorAdmin.txt")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.Else
+		'Read file
+		F.Intrinsic.File.File2String(V.Global.sAdminFilePath, V.Global.sAdminFileContents)
+		F.Intrinsic.Control.If(V.Global.sAdminFileContents.Trim, =, "")
+			F.Intrinsic.String.Build("Please add at least one email to send 7380 error logs to{0}located at {1}", V.Ambient.NewLine, V.Global.sAdminFilePath, V.Local.sMsg)
+			F.Intrinsic.UI.Msgbox(V.Local.sMsg, "No emails in ErrorAdmin.txt")
+			F.Intrinsic.Control.End
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	
+	'Read Error File
+	F.Intrinsic.File.File2String(V.Global.sErrorFilePath, V.Global.sErrorFileContents)
+	V.Global.sErrorFileContents.Set(V.Global.sErrorFileContents.Trim)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.Callsub("Error", CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.ReadAdminFile.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8789.15319$}$1
+${$6$}$bmedina$}$20240312092907916$}$kOipCrsyLBVj2KoSwkcdK23ChxGVcBlEyJB1XVsqo4g1YbT1eDEpOpJNTcQpWUZSgKuT6+v2Dk4=
+Program.Sub.Comments.End
